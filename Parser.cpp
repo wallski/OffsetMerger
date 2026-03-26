@@ -3,6 +3,7 @@
 #include <iostream>
 #include <algorithm>
 #include <map>
+#include <set>
 
 std::vector<std::filesystem::path> OffsetParser::findHppFiles(const std::filesystem::path& directory) {
     std::vector<std::filesystem::path> result;
@@ -77,6 +78,24 @@ std::string OffsetParser::extractContext(const std::string& line, const std::vec
     return "global";
 }
 
+// Helper to make valid C++ identifier
+static std::string makeValidNamespace(const std::string& name) {
+    std::string result;
+    for (char c : name) {
+        if (std::isalnum(c) || c == '_') {
+            result += c;
+        }
+        else if (c == ' ' || c == ':' || c == '-' || c == '.' || c == '>') {
+            result += '_';
+        }
+        // skip other invalid chars
+    }
+    if (result.empty() || std::isdigit(result[0])) {
+        result = "_" + result;
+    }
+    return result;
+}
+
 bool OffsetParser::generateMergedFile(const std::filesystem::path& outputPath,
     const std::vector<std::filesystem::path>& selectedFiles,
     const std::string& namespaceName) {
@@ -85,35 +104,57 @@ bool OffsetParser::generateMergedFile(const std::filesystem::path& outputPath,
 
     out << "#pragma once\n";
     out << "#include <cstdint>\n\n";
-    out << "namespace " << namespaceName << "\n{\n";
 
-    std::map<std::string, std::vector<OffsetEntry>> byFile;
+    // Collect entries from selected files
+    std::vector<OffsetEntry> selectedEntries;
     for (const auto& e : entries) {
-        bool selected = false;
         for (const auto& sf : selectedFiles) {
-            if (e.sourceFile == sf.filename().string()) { selected = true; break; }
+            if (e.sourceFile == sf.filename().string()) {
+                selectedEntries.push_back(e);
+                break;
+            }
         }
-        if (selected) byFile[e.sourceFile].push_back(e);
     }
 
-    for (const auto& [file, group] : byFile) {
+    // Group by context (class/namespace)
+    std::map<std::string, std::vector<OffsetEntry>> byContext;
+    for (const auto& e : selectedEntries) {
+        std::string ctx = makeValidNamespace(e.context);
+        byContext[ctx].push_back(e);
+    }
+
+    // Check for duplicate names within same context
+    std::map<std::string, std::set<std::string>> contextNames;
+    for (const auto& [ctx, group] : byContext) {
+        for (const auto& e : group) {
+            if (contextNames[ctx].count(e.name)) {
+                // Duplicate in same context - keep first, skip others
+                // (or could append _2, _3, etc.)
+            }
+            contextNames[ctx].insert(e.name);
+        }
+    }
+
+    // Generate nested namespaces
+    out << "namespace " << namespaceName << "\n{\n";
+
+    for (const auto& [ctx, group] : byContext) {
         if (group.empty()) continue;
 
         out << "\n    // ============================================\n";
-        out << "    // Source: " << file << "\n";
+        out << "    // Context: " << ctx << "\n";
         out << "    // ============================================\n";
+        out << "    namespace " << ctx << "\n    {\n";
 
-        std::map<std::string, std::vector<OffsetEntry>> byContext;
-        for (const auto& e : group) byContext[e.context].push_back(e);
+        std::set<std::string> written;
+        for (const auto& e : group) {
+            if (written.count(e.name)) continue; // skip duplicates
 
-        for (const auto& [ctx, ctxGroup] : byContext) {
-            if (ctx != "global" && ctx != file) {
-                out << "\n    // -> " << ctx << "\n";
-            }
-            for (const auto& e : ctxGroup) {
-                out << "    constexpr std::ptrdiff_t " << e.name << " = " << e.value << ";\n";
-            }
+            out << "        constexpr std::ptrdiff_t " << e.name << " = " << e.value << ";\n";
+            written.insert(e.name);
         }
+
+        out << "    }\n";
     }
 
     out << "}\n";
