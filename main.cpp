@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include <filesystem>
+#include <algorithm>
 
 #include "../ext/imgui/imgui.h"
 #include "../ext/imgui/imgui_impl_win32.h"
@@ -15,7 +16,7 @@
 static ID3D11Device* g_pd3dDevice = nullptr;
 static ID3D11DeviceContext* g_pd3dDeviceContext = nullptr;
 static IDXGISwapChain* g_pSwapChain = nullptr;
-static UINT                     g_ResizeWidth = 0, g_ResizeHeight = 0;
+static UINT                    g_ResizeWidth = 0, g_ResizeHeight = 0;
 static ID3D11RenderTargetView* g_mainRenderTargetView = nullptr;
 
 bool CreateDeviceD3D(HWND hWnd);
@@ -30,10 +31,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         _T("OffsetMerger"), nullptr };
     ::RegisterClassEx(&wc);
 
-    // WS_POPUP = no OS titlebar / border at all
-    HWND hwnd = ::CreateWindow(wc.lpszClassName, _T("Offset Merger"),
-        WS_POPUP,
-        100, 100, 480, 580,
+    int width = 900;
+    int height = 600;
+
+    HWND hwnd = ::CreateWindow(wc.lpszClassName, _T("OffsetMerger"),
+        WS_POPUP | WS_VISIBLE,
+        100, 100, width, height,
         nullptr, nullptr, wc.hInstance, nullptr);
 
     if (!CreateDeviceD3D(hwnd)) {
@@ -50,9 +53,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    // store hwnd so gui.cpp drag code can use it
-    io.BackendPlatformUserData = (void*)hwnd;
-
     GUI::setDarkPurpleTheme();
 
     ImGui_ImplWin32_Init(hwnd);
@@ -66,7 +66,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         state.folderSelected = true;
         std::vector<std::string> savedSelected;
         Config::loadSelectedFiles(savedSelected);
-
         for (const auto& entry : std::filesystem::directory_iterator(state.outputFolder)) {
             if (!entry.is_regular_file()) continue;
             auto ext = entry.path().extension().string();
@@ -81,7 +80,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             }
         }
     }
-
     Config::loadOutputFile(state.outputFilePath);
 
     bool done = false;
@@ -120,20 +118,20 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
                 Config::saveLastPath(state.outputFolder);
             }
             else {
-                state.statusMessage = "Error: failed to write file";
+                state.statusMessage = "Error: failed to write output file";
             }
-            state.statusTimer = 4.0f;
+            state.statusTimer = 5.0f;
             state.showStatus = true;
             });
 
         if (state.showStatus) {
             state.statusTimer -= io.DeltaTime;
-            if (state.statusTimer <= 0.0f) state.showStatus = false;
+            if (state.statusTimer <= 0.f) state.showStatus = false;
         }
 
         ImGui::Render();
-        // clear color matches #0B0812
-        const float cc[4] = { 0.043f, 0.031f, 0.071f, 1.00f };
+        // clear = #09060F
+        const float cc[4] = { 0.035f, 0.024f, 0.059f, 1.f };
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, cc);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -159,11 +157,10 @@ bool CreateDeviceD3D(HWND hWnd) {
     sd.SampleDesc.Count = 1;
     sd.Windowed = TRUE;
     sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-    UINT flags = 0;
     D3D_FEATURE_LEVEL fl;
     const D3D_FEATURE_LEVEL fla[] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0 };
-    if (D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr,
-        flags, fla, 2, D3D11_SDK_VERSION, &sd,
+    if (D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0,
+        fla, 2, D3D11_SDK_VERSION, &sd,
         &g_pSwapChain, &g_pd3dDevice, &fl, &g_pd3dDeviceContext) != S_OK)
         return false;
     CreateRenderTarget();
@@ -209,12 +206,6 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DESTROY:
         ::PostQuitMessage(0);
         return 0;
-        // hit-test: let the OS know the whole window is draggable
-        // (only needed so window can be moved via WinAPI in the drag handler)
-    case WM_NCHITTEST: {
-        LRESULT hit = DefWindowProc(hWnd, msg, wParam, lParam);
-        return hit;
-    }
     }
     return ::DefWindowProc(hWnd, msg, wParam, lParam);
 }

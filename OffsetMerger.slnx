@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="OffsetMerger.vcxproj" />
+  <Project Path="OffsetMerger.vcxproj" Id="1dadad37-749d-4ce1-8120-6a79981f30eb" />
 </Solution>
